@@ -7,26 +7,19 @@ import io
 st.set_page_config(page_title="日報サイネージ生成", layout="wide")
 
 st.title("🚀 日報サイネージ生成ツール")
-st.write("PDFを読み取って、サイネージに載せる項目を選ぼう。")
 
 # --- 1. 背景画像とフォントの準備 ---
-# エラー防止のために、あらかじめデフォルトを空で定義しておく
 font_main = None
 font_title = None
 base_image = None
 
 try:
-    # GitHubにアップした背景とフォントを読み込む
     base_image = Image.open("base_design.png").convert("RGBA")
-    
-    # 指定されたフォント名に合わせているよ
     font_path = "NotoSansJP-Regular.ttf" 
     font_main = ImageFont.truetype(font_path, 40)
     font_title = ImageFont.truetype(font_path, 65)
 except Exception as e:
-    st.error(f"ファイルの読み込みに失敗したよ。GitHubに 'base_design.png' と 'NotoSansJP-Regular.ttf' があるか確認してね！")
-    st.info(f"エラー詳細: {e}")
-    # ファイルがない場合でも動くように標準フォントを代入
+    st.error(f"ファイルの読み込みに失敗したよ。GitHubのファイル名を確認してね！")
     font_main = ImageFont.load_default()
     font_title = ImageFont.load_default()
     if base_image is None:
@@ -37,13 +30,10 @@ def parse_nippo(file):
     try:
         with pdfplumber.open(file) as pdf:
             table = pdf.pages[0].extract_table()
-            if not table:
-                return []
-            # 空行を除去して、最低限データが入っている行だけ抽出
+            if not table: return []
             clean_data = [row for row in table if row and any(row)]
-            return clean_data[1:] # ヘッダー（1行目）を除いて返す
-    except Exception as e:
-        st.error(f"PDFの解析でエラーが出たよ: {e}")
+            return clean_data[1:]
+    except:
         return []
 
 # --- 3. メイン画面のUI ---
@@ -52,22 +42,14 @@ uploaded_pdf = st.file_uploader("日報PDFをここにドロップ", type="pdf")
 if uploaded_pdf:
     rows = parse_nippo(uploaded_pdf)
     
-    if not rows:
-        st.warning("PDFから作業データが見つからなかったよ。フォーマットが合っているか確認してみて。")
-    else:
+    if rows:
         st.subheader("📝 反映させる項目を選択")
         selected_rows = []
-        
-        # 選択用UIを2列で表示
         cols = st.columns(2)
         for i, row in enumerate(rows):
-            # PDFの列構造に合わせてラベルを作成（Room, 作品名, 担当など）
-            # インデックスがズレてもエラーにならないように安全に取得
             room = row[0] if len(row) > 0 else "不明"
             title = row[1] if len(row) > 1 else "なし"
-            staff = row[4] if len(row) > 4 else "未定"
-            
-            label = f"【{room}】 {title} （{staff}）"
+            label = f"【{room}】 {title}"
             if cols[i % 2].checkbox(label, key=f"check_{i}"):
                 selected_rows.append(row)
 
@@ -76,9 +58,32 @@ if uploaded_pdf:
             if not selected_rows:
                 st.error("項目を1つ以上選んでね！")
             else:
+                # ✍️ ここで座標を定義（絶対にエラーが出ないようにボタンの直後に置いたよ！）
+                start_x = 220
+                start_y = 380
+                line_height = 90
+                
                 # 編集用の透明レイヤーを作成
                 txt_layer = Image.new("RGBA", base_image.size, (255, 255, 255, 0))
                 draw = ImageDraw.Draw(txt_layer)
                 
-                # --- レイアウト設定（ここをいじれば文字位置が変わる！） ---
-                start_x
+                # タイトル（TODAY'S SCHEDULE）
+                draw.text((start_x, start_y - 140), "TODAY'S SCHEDULE", font=font_title, fill=(255, 255, 255, 255))
+                
+                # 選択項目の書き込み
+                for i, row in enumerate(selected_rows):
+                    current_y = start_y + (i * line_height)
+                    room = row[0] if len(row) > 0 else "?"
+                    title = row[1] if len(row) > 1 else "---"
+                    staff = row[4] if len(row) > 4 else "---"
+                    
+                    display_text = f"● [{room}]  {title}　/　{staff}"
+                    draw.text((start_x, current_y), display_text, font=font_main, fill=(255, 255, 255, 255))
+                
+                # 合成
+                combined = Image.alpha_composite(base_image, txt_layer)
+                final_img = combined.convert("RGB")
+                
+                st.image(final_img, caption="生成完了！", use_container_width=True)
+                
+                buf = io.BytesIO()
